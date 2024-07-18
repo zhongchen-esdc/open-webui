@@ -5,6 +5,118 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2024-07-17
+
+### Fixed
+
+- **🔄 Improved File Upload**: Addressed the issue where file uploads lacked animation.
+- **💬 Chat Continuity**: Fixed a problem where existing chats were not functioning properly in some instances.
+- **🗂️ Chat File Reset**: Resolved the issue of chat files not resetting for new conversations, now ensuring a clean slate for each chat session.
+- **📁 Document Workspace Uploads**: Corrected the handling of document uploads in the workspace using the Files API.
+
+## [0.3.9] - 2024-07-17
+
+### Added
+
+- **📁 Files Chat Controls**: We've reverted to the old file handling behavior where uploaded files are always included. You can now manage files directly within the chat controls section, giving you the ability to remove files as needed.
+- **🔧 "Action" Function Support**: Introducing a new "Action" function to write custom buttons to the message toolbar. This feature enables more interactive messaging, with documentation coming soon.
+- **📜 Citations Handling**: For newly uploaded files in documents workspace, citations will now display the actual filename. Additionally, you can click on these filenames to open the file in a new tab for easier access.
+- **🛠️ Event Emitter and Call Updates**: Enhanced 'event_emitter' to allow message replacement and 'event_call' to support text input for Tools and Functions. Detailed documentation will be provided shortly.
+- **🎨 Styling Refactor**: Various styling updates for a cleaner and more cohesive user interface.
+- **🌐 Enhanced Translations**: Improved translations for Catalan, Ukrainian, and Brazilian Portuguese.
+
+### Fixed
+
+- **🔧 Chat Controls Priority**: Resolved an issue where Chat Controls values were being overridden by model information parameters. The priority is now Chat Controls, followed by Global Settings, then Model Settings.
+- **🪲 Debug Logs**: Fixed an issue where debug logs were not being logged properly.
+- **🔑 Automatic1111 Auth Key**: The auth key for Automatic1111 is no longer required.
+- **📝 Title Generation**: Ensured that the title generation runs only once, even when multiple models are in a chat.
+- **✅ Boolean Values in Params**: Added support for boolean values in parameters.
+- **🖼️ Files Overlay Styling**: Fixed the styling issue with the files overlay.
+
+### Changed
+
+- **⬆️ Dependency Updates**
+  - Upgraded 'pydantic' from version 2.7.1 to 2.8.2.
+  - Upgraded 'sqlalchemy' from version 2.0.30 to 2.0.31.
+  - Upgraded 'unstructured' from version 0.14.9 to 0.14.10.
+  - Upgraded 'chromadb' from version 0.5.3 to 0.5.4.
+
+## [0.3.8] - 2024-07-09
+
+### Added
+
+- **💬 Chat Controls**: Easily adjust parameters for each chat session, offering more precise control over your interactions.
+- **📌 Pinned Chats**: Support for pinned chats, allowing you to keep important conversations easily accessible.
+- **📄 Apache Tika Integration**: Added support for using Apache Tika as a document loader, enhancing document processing capabilities.
+- **🛠️ Custom Environment for OpenID Claims**: Allows setting custom claims for OpenID, providing more flexibility in user authentication.
+- **🔧 Enhanced Tools & Functions API**: Introduced 'event_emitter' and 'event_call', now you can also add citations for better documentation and tracking. Detailed documentation will be provided on our documentation website.
+- **↔️ Sideways Scrolling in Settings**: Settings tabs container now supports horizontal scrolling for easier navigation.
+- **🌑 Darker OLED Theme**: Includes a new, darker OLED theme and improved styling for the light theme, enhancing visual appeal.
+- **🌐 Language Updates**: Updated translations for Indonesian, German, French, and Catalan languages, expanding accessibility.
+
+### Fixed
+
+- **⏰ OpenAI Streaming Timeout**: Resolved issues with OpenAI streaming response using the 'AIOHTTP_CLIENT_TIMEOUT' setting, ensuring reliable performance.
+- **💡 User Valves**: Fixed malfunctioning user valves, ensuring proper functionality.
+- **🔄 Collapsible Components**: Addressed issues with collapsible components not working, restoring expected behavior.
+
+### Changed
+
+- **🗃️ Database Backend**: Switched from Peewee to SQLAlchemy for improved concurrency support, enhancing database performance.
+- **⬆️ ChromaDB Update**: Upgraded to version 0.5.3. Ensure your remote ChromaDB instance matches this version.
+- **🔤 Primary Font Styling**: Updated primary font to Archivo for better visual consistency.
+- **🔄 Font Change for Windows**: Replaced Arimo with Inter font for Windows users, improving readability.
+- **🚀 Lazy Loading**: Implemented lazy loading for 'faster_whisper' and 'sentence_transformers' to reduce startup memory usage.
+- **📋 Task Generation Payload**: Task generations now include only the "task" field in the body instead of "title".
+
+## [0.3.7] - 2024-06-29
+
+### Added
+
+- **🌐 Enhanced Internationalization (i18n)**: Newly introduced Indonesian translation, and updated translations for Turkish, Chinese, and Catalan languages to improve user accessibility.
+
+### Fixed
+
+- **🕵️‍♂️ Browser Language Detection**: Corrected the issue where the application was not properly detecting and adapting to the browser's language settings.
+- **🔐 OIDC Admin Role Assignment**: Fixed a bug where the admin role was not being assigned to the first user who signed up via OpenID Connect (OIDC).
+- **💬 Chat/Completions Endpoint**: Resolved an issue where the chat/completions endpoint was non-functional when the stream option was set to False.
+- **🚫 'WEBUI_AUTH' Configuration**: Addressed the problem where setting 'WEBUI_AUTH' to False was not being applied correctly.
+
+### Changed
+
+- **📦 Dependency Update**: Upgraded 'authlib' from version 1.3.0 to 1.3.1 to ensure better security and performance enhancements.
+
+## [0.3.6] - 2024-06-27
+
+### Added
+
+- **✨ "Functions" Feature**: You can now utilize "Functions" like filters (middleware) and pipe (model) functions directly within the WebUI. While largely compatible with Pipelines, these native functions can be executed easily within Open WebUI. Example use cases for filter functions include usage monitoring, real-time translation, moderation, and automemory. For pipe functions, the scope ranges from Cohere and Anthropic integration directly within Open WebUI, enabling "Valves" for per-user OpenAI API key usage, and much more. If you encounter issues, SAFE_MODE has been introduced.
+- **📁 Files API**: Compatible with OpenAI, this feature allows for custom Retrieval-Augmented Generation (RAG) in conjunction with the Filter Function. More examples will be shared on our community platform and official documentation website.
+- **🛠️ Tool Enhancements**: Tools now support citations and "Valves". Documentation will be available shortly.
+- **🔗 Iframe Support via Files API**: Enables rendering HTML directly into your chat interface using functions and tools. Use cases include playing games like DOOM and Snake, displaying a weather applet, and implementing Anthropic "artifacts"-like features. Stay tuned for updates on our community platform and documentation.
+- **🔒 Experimental OAuth Support**: New experimental OAuth support. Check our documentation for more details.
+- **🖼️ Custom Background Support**: Set a custom background from Settings > Interface to personalize your experience.
+- **🔑 AUTOMATIC1111_API_AUTH Support**: Enhanced security for the AUTOMATIC1111 API.
+- **🎨 Code Highlight Optimization**: Improved code highlighting features.
+- **🎙️ Voice Interruption Feature**: Reintroduced and now toggleable from Settings > Interface.
+- **💤 Wakelock API**: Now in use to prevent screen dimming during important tasks.
+- **🔐 API Key Privacy**: All API keys are now hidden by default for better security.
+- **🔍 New Web Search Provider**: Added jina_search as a new option.
+- **🌐 Enhanced Internationalization (i18n)**: Improved Korean translation and updated Chinese and Ukrainian translations.
+
+### Fixed
+
+- **🔧 Conversation Mode Issue**: Fixed the issue where Conversation Mode remained active after being removed from settings.
+- **📏 Scroll Button Obstruction**: Resolved the issue where the scrollToBottom button container obstructed clicks on buttons beneath it.
+
+### Changed
+
+- **⏲️ AIOHTTP_CLIENT_TIMEOUT**: Now set to 'None' by default for improved configuration flexibility.
+- **📞 Voice Call Enhancements**: Improved by skipping code blocks and expressions during calls.
+- **🚫 Error Message Handling**: Disabled the continuation of operations with error messages.
+- **🗂️ Playground Relocation**: Moved the Playground from the workspace to the user menu for better user experience.
+
 ## [0.3.5] - 2024-06-16
 
 ### Added

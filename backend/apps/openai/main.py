@@ -16,13 +16,17 @@ from apps.webui.models.users import Users
 from constants import ERROR_MESSAGES
 from utils.utils import (
     decode_token,
-    get_current_user,
+    get_verified_user,
     get_verified_user,
     get_admin_user,
 )
+from utils.task import prompt_template
+from utils.misc import add_or_update_system_message
+
 from config import (
     SRC_LOG_LEVELS,
     ENABLE_OPENAI_API,
+    AIOHTTP_CLIENT_TIMEOUT,
     OPENAI_API_BASE_URLS,
     OPENAI_API_KEYS,
     CACHE_DIR,
@@ -294,7 +298,7 @@ async def get_all_models(raw: bool = False):
 
 @app.get("/models")
 @app.get("/models/{url_idx}")
-async def get_models(url_idx: Optional[int] = None, user=Depends(get_current_user)):
+async def get_models(url_idx: Optional[int] = None, user=Depends(get_verified_user)):
     if url_idx == None:
         models = await get_all_models()
         if app.state.config.ENABLE_MODEL_FILTER:
@@ -354,6 +358,8 @@ async def generate_chat_completion(
 ):
     idx = 0
     payload = {**form_data}
+    if "metadata" in payload:
+        del payload["metadata"]
 
     model_id = form_data.get("model")
     model_info = Models.get_model_by_id(model_id)
@@ -365,24 +371,33 @@ async def generate_chat_completion(
         model_info.params = model_info.params.model_dump()
 
         if model_info.params:
-            if model_info.params.get("temperature", None) is not None:
+            if (
+                model_info.params.get("temperature", None)
+                and payload.get("temperature") is None
+            ):
                 payload["temperature"] = float(model_info.params.get("temperature"))
 
-            if model_info.params.get("top_p", None):
+            if model_info.params.get("top_p", None) and payload.get("top_p") is None:
                 payload["top_p"] = int(model_info.params.get("top_p", None))
 
-            if model_info.params.get("max_tokens", None):
+            if (
+                model_info.params.get("max_tokens", None)
+                and payload.get("max_tokens") is None
+            ):
                 payload["max_tokens"] = int(model_info.params.get("max_tokens", None))
 
-            if model_info.params.get("frequency_penalty", None):
+            if (
+                model_info.params.get("frequency_penalty", None)
+                and payload.get("frequency_penalty") is None
+            ):
                 payload["frequency_penalty"] = int(
                     model_info.params.get("frequency_penalty", None)
                 )
 
-            if model_info.params.get("seed", None):
+            if model_info.params.get("seed", None) and payload.get("seed") is None:
                 payload["seed"] = model_info.params.get("seed", None)
 
-            if model_info.params.get("stop", None):
+            if model_info.params.get("stop", None) and payload.get("stop") is None:
                 payload["stop"] = (
                     [
                         bytes(stop, "utf-8").decode("unicode_escape")
@@ -392,24 +407,25 @@ async def generate_chat_completion(
                     else None
                 )
 
-        if model_info.params.get("system", None):
-            # Check if the payload already has a system message
-            # If not, add a system message to the payload
+        system = model_info.params.get("system", None)
+        if system:
+            system = prompt_template(
+                system,
+                **(
+                    {
+                        "user_name": user.name,
+                        "user_location": (
+                            user.info.get("location") if user.info else None
+                        ),
+                    }
+                    if user
+                    else {}
+                ),
+            )
             if payload.get("messages"):
-                for message in payload["messages"]:
-                    if message.get("role") == "system":
-                        message["content"] = (
-                            model_info.params.get("system", None) + message["content"]
-                        )
-                        break
-                else:
-                    payload["messages"].insert(
-                        0,
-                        {
-                            "role": "system",
-                            "content": model_info.params.get("system", None),
-                        },
-                    )
+                payload["messages"] = add_or_update_system_message(
+                    system, payload["messages"]
+                )
 
     else:
         pass
@@ -418,7 +434,12 @@ async def generate_chat_completion(
     idx = model["urlIdx"]
 
     if "pipeline" in model and model.get("pipeline"):
-        payload["user"] = {"name": user.name, "id": user.id}
+        payload["user"] = {
+            "name": user.name,
+            "id": user.id,
+            "email": user.email,
+            "role": user.role,
+        }
 
     # Check if the model is "gpt-4-vision-preview" and set "max_tokens" to 4000
     # This is a workaround until OpenAI fixes the issue with this model
@@ -444,7 +465,9 @@ async def generate_chat_completion(
     streaming = False
 
     try:
-        session = aiohttp.ClientSession(trust_env=True)
+        session = aiohttp.ClientSession(
+            trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
+        )
         r = await session.request(
             method="POST",
             url=f"{url}/chat/completions",

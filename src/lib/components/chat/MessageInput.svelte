@@ -15,11 +15,19 @@
 	import { blobToFile, calculateSHA256, findWordIndices } from '$lib/utils';
 
 	import {
+		processDocToVectorDB,
 		uploadDocToVectorDB,
 		uploadWebToVectorDB,
 		uploadYoutubeTranscriptionToVectorDB
 	} from '$lib/apis/rag';
-	import { SUPPORTED_FILE_TYPE, SUPPORTED_FILE_EXTENSIONS, WEBUI_BASE_URL } from '$lib/constants';
+
+	import { uploadFile } from '$lib/apis/files';
+	import {
+		SUPPORTED_FILE_TYPE,
+		SUPPORTED_FILE_EXTENSIONS,
+		WEBUI_BASE_URL,
+		WEBUI_API_BASE_URL
+	} from '$lib/constants';
 
 	import Prompts from './MessageInput/PromptCommands.svelte';
 	import Suggestions from './MessageInput/Suggestions.svelte';
@@ -32,8 +40,12 @@
 	import Headphone from '../icons/Headphone.svelte';
 	import VoiceRecording from './MessageInput/VoiceRecording.svelte';
 	import { transcribeAudio } from '$lib/apis/audio';
+	import FileItem from '../common/FileItem.svelte';
+	import FilesOverlay from './MessageInput/FilesOverlay.svelte';
 
 	const i18n = getContext('i18n');
+
+	export let transparentBackground = false;
 
 	export let submitPrompt: Function;
 	export let stopResponse: Function;
@@ -84,44 +96,75 @@
 		element.scrollTop = element.scrollHeight;
 	};
 
-	const uploadDoc = async (file) => {
+	const uploadFileHandler = async (file) => {
 		console.log(file);
-
-		const doc = {
-			type: 'doc',
-			name: file.name,
-			collection_name: '',
-			upload_status: false,
-			error: ''
-		};
-
-		try {
-			files = [...files, doc];
-
-			if (['audio/mpeg', 'audio/wav'].includes(file['type'])) {
-				const res = await transcribeAudio(localStorage.token, file).catch((error) => {
-					toast.error(error);
-					return null;
-				});
-
-				if (res) {
-					console.log(res);
-					const blob = new Blob([res.text], { type: 'text/plain' });
-					file = blobToFile(blob, `${file.name}.txt`);
-				}
-			}
-
-			const res = await uploadDocToVectorDB(localStorage.token, '', file);
+		// Check if the file is an audio file and transcribe/convert it to text file
+		if (['audio/mpeg', 'audio/wav'].includes(file['type'])) {
+			const res = await transcribeAudio(localStorage.token, file).catch((error) => {
+				toast.error(error);
+				return null;
+			});
 
 			if (res) {
-				doc.upload_status = true;
-				doc.collection_name = res.collection_name;
+				console.log(res);
+				const blob = new Blob([res.text], { type: 'text/plain' });
+				file = blobToFile(blob, `${file.name}.txt`);
+			}
+		}
+
+		// Upload the file to the server
+		const uploadedFile = await uploadFile(localStorage.token, file).catch((error) => {
+			toast.error(error);
+			return null;
+		});
+
+		if (uploadedFile) {
+			const fileItem = {
+				type: 'file',
+				file: uploadedFile,
+				id: uploadedFile.id,
+				url: `${WEBUI_API_BASE_URL}/files/${uploadedFile.id}`,
+				name: file.name,
+				collection_name: '',
+				status: 'uploaded',
+				error: ''
+			};
+			files = [...files, fileItem];
+
+			// TODO: Check if tools & functions have files support to skip this step to delegate file processing
+			// Default Upload to VectorDB
+			if (
+				SUPPORTED_FILE_TYPE.includes(file['type']) ||
+				SUPPORTED_FILE_EXTENSIONS.includes(file.name.split('.').at(-1))
+			) {
+				processFileItem(fileItem);
+			} else {
+				toast.error(
+					$i18n.t(`Unknown file type '{{file_type}}'. Proceeding with the file upload anyway.`, {
+						file_type: file['type']
+					})
+				);
+				processFileItem(fileItem);
+			}
+		}
+	};
+
+	const processFileItem = async (fileItem) => {
+		try {
+			const res = await processDocToVectorDB(localStorage.token, fileItem.id);
+
+			if (res) {
+				fileItem.status = 'processed';
+				fileItem.collection_name = res.collection_name;
 				files = files;
 			}
 		} catch (e) {
 			// Remove the failed doc from the files array
-			files = files.filter((f) => f.name !== file.name);
+			// files = files.filter((f) => f.id !== fileItem.id);
 			toast.error(e);
+
+			fileItem.status = 'processed';
+			files = files;
 		}
 	};
 
@@ -132,7 +175,7 @@
 			type: 'doc',
 			name: url,
 			collection_name: '',
-			upload_status: false,
+			status: false,
 			url: url,
 			error: ''
 		};
@@ -142,7 +185,7 @@
 			const res = await uploadWebToVectorDB(localStorage.token, '', url);
 
 			if (res) {
-				doc.upload_status = true;
+				doc.status = 'processed';
 				doc.collection_name = res.collection_name;
 				files = files;
 			}
@@ -160,7 +203,7 @@
 			type: 'doc',
 			name: url,
 			collection_name: '',
-			upload_status: false,
+			status: false,
 			url: url,
 			error: ''
 		};
@@ -170,7 +213,7 @@
 			const res = await uploadYoutubeTranscriptionToVectorDB(localStorage.token, url);
 
 			if (res) {
-				doc.upload_status = true;
+				doc.status = 'processed';
 				doc.collection_name = res.collection_name;
 				files = files;
 			}
@@ -228,19 +271,8 @@
 								];
 							};
 							reader.readAsDataURL(file);
-						} else if (
-							SUPPORTED_FILE_TYPE.includes(file['type']) ||
-							SUPPORTED_FILE_EXTENSIONS.includes(file.name.split('.').at(-1))
-						) {
-							uploadDoc(file);
 						} else {
-							toast.error(
-								$i18n.t(
-									`Unknown File Type '{{file_type}}', but accepting and treating as plain text`,
-									{ file_type: file['type'] }
-								)
-							);
-							uploadDoc(file);
+							uploadFileHandler(file);
 						}
 					});
 				} else {
@@ -267,33 +299,18 @@
 	});
 </script>
 
-{#if dragged}
-	<div
-		class="fixed {$showSidebar
-			? 'left-0 md:left-[260px] md:w-[calc(100%-260px)]'
-			: 'left-0'}  w-full h-full flex z-50 touch-none pointer-events-none"
-		id="dropzone"
-		role="region"
-		aria-label="Drag and Drop Container"
-	>
-		<div class="absolute w-full h-full backdrop-blur bg-gray-800/40 flex justify-center">
-			<div class="m-auto pt-64 flex flex-col justify-center">
-				<div class="max-w-md">
-					<AddFilesPlaceholder />
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
+<FilesOverlay show={dragged} />
 
-<div class="w-full">
+<div class="w-full font-primary">
 	<div class=" -mb-0.5 mx-auto inset-x-0 bg-transparent flex justify-center">
 		<div class="flex flex-col max-w-6xl px-2.5 md:px-6 w-full">
 			<div class="relative">
 				{#if autoScroll === false && messages.length > 0}
-					<div class=" absolute -top-12 left-0 right-0 flex justify-center z-30">
+					<div
+						class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
+					>
 						<button
-							class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full"
+							class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
 							on:click={() => {
 								autoScroll = true;
 								scrollToBottom();
@@ -336,9 +353,9 @@
 							files = [
 								...files,
 								{
-									type: e?.detail?.type ?? 'doc',
+									type: e?.detail?.type ?? 'file',
 									...e.detail,
-									upload_status: true
+									status: 'processed'
 								}
 							];
 						}}
@@ -391,7 +408,7 @@
 		</div>
 	</div>
 
-	<div class="bg-white dark:bg-gray-900">
+	<div class="{transparentBackground ? 'bg-transparent' : 'bg-white dark:bg-gray-900'} ">
 		<div class="max-w-6xl px-2.5 md:px-6 mx-auto inset-x-0">
 			<div class=" pb-2">
 				<input
@@ -407,8 +424,6 @@
 								if (['image/gif', 'image/webp', 'image/jpeg', 'image/png'].includes(file['type'])) {
 									if (visionCapableModels.length === 0) {
 										toast.error($i18n.t('Selected model(s) do not support image inputs'));
-										inputFiles = null;
-										filesInputElement.value = '';
 										return;
 									}
 									let reader = new FileReader();
@@ -420,30 +435,17 @@
 												url: `${event.target.result}`
 											}
 										];
-										inputFiles = null;
-										filesInputElement.value = '';
 									};
 									reader.readAsDataURL(file);
-								} else if (
-									SUPPORTED_FILE_TYPE.includes(file['type']) ||
-									SUPPORTED_FILE_EXTENSIONS.includes(file.name.split('.').at(-1))
-								) {
-									uploadDoc(file);
-									filesInputElement.value = '';
 								} else {
-									toast.error(
-										$i18n.t(
-											`Unknown File Type '{{file_type}}', but accepting and treating as plain text`,
-											{ file_type: file['type'] }
-										)
-									);
-									uploadDoc(file);
-									filesInputElement.value = '';
+									uploadFileHandler(file);
 								}
 							});
 						} else {
 							toast.error($i18n.t(`File not found.`));
 						}
+
+						filesInputElement.value = '';
 					}}
 				/>
 
@@ -483,10 +485,10 @@
 							dir={$settings?.chatDirection ?? 'LTR'}
 						>
 							{#if files.length > 0}
-								<div class="mx-2 mt-2 mb-1 flex flex-wrap gap-2">
+								<div class="mx-1 mt-2.5 mb-1 flex flex-wrap gap-2">
 									{#each files as file, fileIdx}
-										<div class=" relative group">
-											{#if file.type === 'image'}
+										{#if file.type === 'image'}
+											<div class=" relative group">
 												<div class="relative">
 													<img
 														src={file.url}
@@ -517,137 +519,40 @@
 														</Tooltip>
 													{/if}
 												</div>
-											{:else if file.type === 'doc'}
-												<div
-													class="h-16 w-[15rem] flex items-center space-x-3 px-2.5 dark:bg-gray-600 rounded-xl border border-gray-200 dark:border-none"
-												>
-													<div class="p-2.5 bg-red-400 text-white rounded-lg">
-														{#if file.upload_status}
-															<svg
-																xmlns="http://www.w3.org/2000/svg"
-																viewBox="0 0 24 24"
-																fill="currentColor"
-																class="w-6 h-6"
-															>
-																<path
-																	fill-rule="evenodd"
-																	d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0 0 16.5 9h-1.875a1.875 1.875 0 0 1-1.875-1.875V5.25A3.75 3.75 0 0 0 9 1.5H5.625ZM7.5 15a.75.75 0 0 1 .75-.75h7.5a.75.75 0 0 1 0 1.5h-7.5A.75.75 0 0 1 7.5 15Zm.75 2.25a.75.75 0 0 0 0 1.5H12a.75.75 0 0 0 0-1.5H8.25Z"
-																	clip-rule="evenodd"
-																/>
-																<path
-																	d="M12.971 1.816A5.23 5.23 0 0 1 14.25 5.25v1.875c0 .207.168.375.375.375H16.5a5.23 5.23 0 0 1 3.434 1.279 9.768 9.768 0 0 0-6.963-6.963Z"
-																/>
-															</svg>
-														{:else}
-															<svg
-																class=" w-6 h-6 translate-y-[0.5px]"
-																fill="currentColor"
-																viewBox="0 0 24 24"
-																xmlns="http://www.w3.org/2000/svg"
-																><style>
-																	.spinner_qM83 {
-																		animation: spinner_8HQG 1.05s infinite;
-																	}
-																	.spinner_oXPr {
-																		animation-delay: 0.1s;
-																	}
-																	.spinner_ZTLf {
-																		animation-delay: 0.2s;
-																	}
-																	@keyframes spinner_8HQG {
-																		0%,
-																		57.14% {
-																			animation-timing-function: cubic-bezier(0.33, 0.66, 0.66, 1);
-																			transform: translate(0);
-																		}
-																		28.57% {
-																			animation-timing-function: cubic-bezier(0.33, 0, 0.66, 0.33);
-																			transform: translateY(-6px);
-																		}
-																		100% {
-																			transform: translate(0);
-																		}
-																	}
-																</style><circle
-																	class="spinner_qM83"
-																	cx="4"
-																	cy="12"
-																	r="2.5"
-																/><circle
-																	class="spinner_qM83 spinner_oXPr"
-																	cx="12"
-																	cy="12"
-																	r="2.5"
-																/><circle
-																	class="spinner_qM83 spinner_ZTLf"
-																	cx="20"
-																	cy="12"
-																	r="2.5"
-																/></svg
-															>
-														{/if}
-													</div>
-
-													<div class="flex flex-col justify-center -space-y-0.5">
-														<div class=" dark:text-gray-100 text-sm font-medium line-clamp-1">
-															{file.name}
-														</div>
-
-														<div class=" text-gray-500 text-sm">{$i18n.t('Document')}</div>
-													</div>
-												</div>
-											{:else if file.type === 'collection'}
-												<div
-													class="h-16 w-[15rem] flex items-center space-x-3 px-2.5 dark:bg-gray-600 rounded-xl border border-gray-200 dark:border-none"
-												>
-													<div class="p-2.5 bg-red-400 text-white rounded-lg">
+												<div class=" absolute -top-1 -right-1">
+													<button
+														class=" bg-gray-400 text-white border border-white rounded-full group-hover:visible invisible transition"
+														type="button"
+														on:click={() => {
+															files.splice(fileIdx, 1);
+															files = files;
+														}}
+													>
 														<svg
 															xmlns="http://www.w3.org/2000/svg"
-															viewBox="0 0 24 24"
+															viewBox="0 0 20 20"
 															fill="currentColor"
-															class="w-6 h-6"
+															class="w-4 h-4"
 														>
 															<path
-																d="M7.5 3.375c0-1.036.84-1.875 1.875-1.875h.375a3.75 3.75 0 0 1 3.75 3.75v1.875C13.5 8.161 14.34 9 15.375 9h1.875A3.75 3.75 0 0 1 21 12.75v3.375C21 17.16 20.16 18 19.125 18h-9.75A1.875 1.875 0 0 1 7.5 16.125V3.375Z"
-															/>
-															<path
-																d="M15 5.25a5.23 5.23 0 0 0-1.279-3.434 9.768 9.768 0 0 1 6.963 6.963A5.23 5.23 0 0 0 17.25 7.5h-1.875A.375.375 0 0 1 15 7.125V5.25ZM4.875 6H6v10.125A3.375 3.375 0 0 0 9.375 19.5H16.5v1.125c0 1.035-.84 1.875-1.875 1.875h-9.75A1.875 1.875 0 0 1 3 20.625V7.875C3 6.839 3.84 6 4.875 6Z"
+																d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
 															/>
 														</svg>
-													</div>
-
-													<div class="flex flex-col justify-center -space-y-0.5">
-														<div class=" dark:text-gray-100 text-sm font-medium line-clamp-1">
-															{file?.title ?? `#${file.name}`}
-														</div>
-
-														<div class=" text-gray-500 text-sm">{$i18n.t('Collection')}</div>
-													</div>
+													</button>
 												</div>
-											{/if}
-
-											<div class=" absolute -top-1 -right-1">
-												<button
-													class=" bg-gray-400 text-white border border-white rounded-full group-hover:visible invisible transition"
-													type="button"
-													on:click={() => {
-														files.splice(fileIdx, 1);
-														files = files;
-													}}
-												>
-													<svg
-														xmlns="http://www.w3.org/2000/svg"
-														viewBox="0 0 20 20"
-														fill="currentColor"
-														class="w-4 h-4"
-													>
-														<path
-															d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"
-														/>
-													</svg>
-												</button>
 											</div>
-										</div>
+										{:else}
+											<FileItem
+												name={file.name}
+												type={file.type}
+												status={file.status}
+												dismissible={true}
+												on:dismiss={() => {
+													files.splice(fileIdx, 1);
+													files = files;
+												}}
+											/>
+										{/if}
 									{/each}
 								</div>
 							{/if}

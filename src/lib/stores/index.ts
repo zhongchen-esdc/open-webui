@@ -22,12 +22,15 @@ export const theme = writable('system');
 export const chatId = writable('');
 
 export const chats = writable([]);
+export const pinnedChats = writable([]);
 export const tags = writable([]);
 
 export const models: Writable<Model[]> = writable([]);
 export const prompts: Writable<Prompt[]> = writable([]);
 export const documents: Writable<Document[]> = writable([]);
+
 export const tools = writable([]);
+export const functions = writable([]);
 
 export const banners: Writable<Banner[]> = writable([]);
 
@@ -136,7 +139,7 @@ type Config = {
 	name: string;
 	version: string;
 	default_locale: string;
-	default_models: string[];
+	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {
 		auth: boolean;
@@ -146,6 +149,11 @@ type Config = {
 		enable_image_generation: boolean;
 		enable_admin_export: boolean;
 		enable_community_sharing: boolean;
+	};
+	oauth: {
+		providers: {
+			[key: string]: string;
+		};
 	};
 };
 

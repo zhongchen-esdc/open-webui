@@ -15,12 +15,13 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { config, models, settings } from '$lib/stores';
+	import { config, models, settings, user } from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	import { imageGenerations } from '$lib/apis/images';
 	import {
 		approximateToHumanReadable,
 		extractSentences,
+		replaceTokens,
 		revertSanitizedResponseContent,
 		sanitizeResponseContent
 	} from '$lib/utils';
@@ -36,6 +37,7 @@
 	import CitationsModal from '$lib/components/chat/Messages/CitationsModal.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import WebSearchResults from './ResponseMessage/WebSearchResults.svelte';
+	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
 	export let message;
 	export let siblings;
@@ -53,6 +55,7 @@
 	export let copyToClipboard: Function;
 	export let continueGeneration: Function;
 	export let regenerateResponse: Function;
+	export let chatActionHandler: Function;
 
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
@@ -74,7 +77,9 @@
 
 	let selectedCitation = null;
 
-	$: tokens = marked.lexer(sanitizeResponseContent(message?.content));
+	$: tokens = marked.lexer(
+		replaceTokens(sanitizeResponseContent(message?.content), model?.name, $user?.name)
+	);
 
 	const renderer = new marked.Renderer();
 
@@ -149,7 +154,10 @@
 			}
 			tooltipInstance = tippy(`#info-${message.id}`, {
 				content: `<span class="text-xs" id="tooltip-${message.id}">${tooltipContent}</span>`,
-				allowHTML: true
+				allowHTML: true,
+				theme: 'dark',
+				arrow: false,
+				offset: [0, 4]
 			});
 		}
 	};
@@ -188,10 +196,6 @@
 
 				if (Object.keys(sentencesAudio).length - 1 === idx) {
 					speaking = null;
-
-					if ($settings.conversationMode) {
-						document.getElementById('voice-input-button')?.click();
-					}
 				}
 
 				res(e);
@@ -235,35 +239,40 @@
 
 					console.log(sentences);
 
-					sentencesAudio = sentences.reduce((a, e, i, arr) => {
-						a[i] = null;
-						return a;
-					}, {});
+					if (sentences.length > 0) {
+						sentencesAudio = sentences.reduce((a, e, i, arr) => {
+							a[i] = null;
+							return a;
+						}, {});
 
-					let lastPlayedAudioPromise = Promise.resolve(); // Initialize a promise that resolves immediately
+						let lastPlayedAudioPromise = Promise.resolve(); // Initialize a promise that resolves immediately
 
-					for (const [idx, sentence] of sentences.entries()) {
-						const res = await synthesizeOpenAISpeech(
-							localStorage.token,
-							$settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice,
-							sentence
-						).catch((error) => {
-							toast.error(error);
+						for (const [idx, sentence] of sentences.entries()) {
+							const res = await synthesizeOpenAISpeech(
+								localStorage.token,
+								$settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice,
+								sentence
+							).catch((error) => {
+								toast.error(error);
 
-							speaking = null;
-							loadingSpeech = false;
+								speaking = null;
+								loadingSpeech = false;
 
-							return null;
-						});
+								return null;
+							});
 
-						if (res) {
-							const blob = await res.blob();
-							const blobUrl = URL.createObjectURL(blob);
-							const audio = new Audio(blobUrl);
-							sentencesAudio[idx] = audio;
-							loadingSpeech = false;
-							lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => playAudio(idx));
+							if (res) {
+								const blob = await res.blob();
+								const blobUrl = URL.createObjectURL(blob);
+								const audio = new Audio(blobUrl);
+								sentencesAudio[idx] = audio;
+								loadingSpeech = false;
+								lastPlayedAudioPromise = lastPlayedAudioPromise.then(() => playAudio(idx));
+							}
 						}
+					} else {
+						speaking = null;
+						loadingSpeech = false;
 					}
 				} else {
 					let voices = [];
@@ -302,7 +311,7 @@
 					}, 100);
 				}
 			} else {
-				toast.error('No content to speak');
+				toast.error($i18n.t('No content to speak'));
 			}
 		}
 	};
@@ -460,6 +469,18 @@
 									e.target.style.height = '';
 									e.target.style.height = `${e.target.scrollHeight}px`;
 								}}
+								on:keydown={(e) => {
+									if (e.key === 'Escape') {
+										document.getElementById('close-edit-message-button')?.click();
+									}
+
+									const isCmdOrCtrlPressed = e.metaKey || e.ctrlKey;
+									const isEnterPressed = e.key === 'Enter';
+
+									if (isCmdOrCtrlPressed && isEnterPressed) {
+										document.getElementById('save-edit-message-button')?.click();
+									}
+								}}
 							/>
 
 							<div class=" mt-2 mb-1 flex justify-end space-x-1.5 text-sm font-medium">
@@ -545,6 +566,11 @@
 											const metadata = citation.metadata?.[index];
 											const id = metadata?.source ?? 'N/A';
 											let source = citation?.source;
+
+											if (metadata?.name) {
+												source = { ...source, name: metadata.name };
+											}
+
 											// Check if ID looks like a URL
 											if (id.startsWith('http://') || id.startsWith('https://')) {
 												source = { name: id };
@@ -1001,6 +1027,33 @@
 														</svg>
 													</button>
 												</Tooltip>
+
+												{#each model?.actions ?? [] as action}
+													<Tooltip content={action.name} placement="bottom">
+														<button
+															type="button"
+															class="{isLastMessage
+																? 'visible'
+																: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition regenerate-response-button"
+															on:click={() => {
+																dispatch('action', action.id);
+															}}
+														>
+															{#if action.icon_url}
+																<img
+																	src={action.icon_url}
+																	class="w-4 h-4 {action.icon_url.includes('svg')
+																		? 'dark:invert-[80%]'
+																		: ''}"
+																	style="fill: currentColor;"
+																	alt={action.name}
+																/>
+															{:else}
+																<Sparkles strokeWidth="2.1" className="size-4" />
+															{/if}
+														</button>
+													</Tooltip>
+												{/each}
 											{/if}
 										{/if}
 									{/if}
